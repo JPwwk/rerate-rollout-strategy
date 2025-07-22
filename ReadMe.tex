@@ -1,0 +1,27 @@
+# Manual Rerate Rollout Strategy Comparison Tool
+
+This Streamlit app helps you simulate and compare the impact of different state-level rollout strategies for rerate data migration.
+
+## 🔍 Features
+
+- Assign U.S. states to rollout groups (R1–R6) for both original and proposed plans
+- Simulate 8-year manual rerate risk exposure by state
+- Adjust yearly growth/reduction modifiers
+- Set rerate capture weights by year
+- Visualize results with confidence bands
+- Upload or download rollout plans
+- Export key risk indicator (KRI) summary as CSV
+
+## 📂 Included Files
+
+- `app.py` – Main Streamlit app
+- `Random number generation.xlsx` – Core input data (state statistics)
+- `requirements.txt` – Libraries needed to run
+- `README.md` – This file
+
+## ⚙️ Setup Instructions (Offline Use)
+
+1. Make sure you have Python 3.9+ installed
+2. Install the required packages:
+```bash
+pip install -r requirements.txt
