@@ -8,6 +8,30 @@ import matplotlib.ticker as mtick
 st.set_page_config(layout='wide')
 st.title("Manual Rerate Rollout Strategy Comparison Tool")
 
+# --- INSTRUCTIONS AND PURPOSE ---
+with st.expander("ℹ️ About this Tool", expanded=True):
+    st.markdown("""
+    This tool helps you compare the impact of different state-level rerate rollout strategies using a Monte Carlo simulation.
+
+    ### 🎯 Purpose:
+    Estimate how much of the total rerate activity is considered **manual rerate** under different rollout plan assignments and timing scenarios.
+
+    ### 🛠️ How to Use:
+    - Assign U.S. states into rollout groups (R1–R10) for both original and proposed plans
+    - Choose rollout dates by quarter
+    - Adjust the **growth/reduction modifiers** to reflect plan assumptions
+    - Set **Lookback Capture Weights** to determine how fast rerates are realized manually
+    - View changes in the output rerate projections and risk indicator (KRI)
+
+    ### 📊 Assumptions:
+    - Rerates are distributed over 8 years post-rollout (weight-controlled)
+    - Each state gets a **single rollout date**
+    - Confidence intervals are based on user-selected z-scores
+    - Simulation isolates only the **manual** portion of rerate projections
+
+    ---
+    """)
+    
 # --- LOAD DATA ---
 
 @st.cache_data
@@ -22,21 +46,25 @@ df = load_data()
 
 # --- ROLLOUT GROUP ASSIGNMENT ---
 
-st.subheader("🧩 Rollout Group Assignment")
+st.subheader("Rollout Group Assignment")
 
 # Get all states
 all_states = sorted(df['State'].unique().tolist())
-group_names = ['R1', 'R2', 'R3', 'R4', 'R5', 'R6']
+group_names = [f'R{i}' for i in range(1, 11)]  # R1 through R10
 
 # --- DEFAULT ASSIGNMENTS TO PRELOAD ---
 
 default_original_assignments = {
     'R1': ['WI'],
     'R2': ['AZ', 'FL', 'IL', 'LA', 'MO', 'MN', 'OH', 'TN', 'TX'],
-    'R3': ['CT', 'IN', 'KS', 'KY', 'MI', 'NY', 'OR', 'SC', 'VA', 'UT'],
-    'R4': ['AL', 'AR', 'DE', 'GA', 'ID', 'MD', 'NC', 'OK', 'RI', 'VI', 'CO', 'NJ'],
-    'R5': ['DC', 'IA', 'MS', 'NM', 'NV', 'PA', 'WV', 'CA', 'HI', 'WA', 'MA'],
-    'R6': ['AK', 'ME', 'MT', 'ND', 'NE', 'SD', 'VT', 'WY', 'NH']
+    'R3': ['CT', 'IN', 'KS', 'KY', 'MD', 'MI', 'NY', 'OR', 'SC', 'VA', 'UT'],
+    'R4': ['AL', 'AR', 'DE', 'GA', 'ID', 'NC', 'OK', 'RI', 'CO', 'NJ'],
+    'R5': ['DC', 'IA', 'MS', 'NM', 'NV', 'PA', 'WV', 'CA', 'HI', 'WA', 'MA', 'VI'],
+    'R6': ['AK', 'ME', 'MT', 'ND', 'NE', 'SD', 'VT', 'WY', 'NH'],
+    'R7': [],
+    'R8': [],
+    'R9': [],
+    'R10': []
 }
 
 default_proposed_assignments = {
@@ -45,9 +73,12 @@ default_proposed_assignments = {
     'R3': ['TX', 'KS', 'IL', 'GA', 'LA', 'AK', 'NH', 'NE', 'ND'],
     'R4': ['MA', 'SC', 'WA', 'AR', 'WY', 'NM', 'ID', 'RI'],
     'R5': ['NY', 'NV', 'MS', 'TN', 'OK', 'DC', 'ME'],
-    'R6': ['MI', 'PA', 'OH', 'CA', 'AL', 'DE', 'FL', 'HI', 'IA', 'KY', 'MN', 'MO', 'MT', 'NJ', 'OR', 'UT', 'VT', 'VI', 'WV', 'WY']
+    'R6': ['MI', 'PA', 'OH', 'CA', 'AL', 'DE', 'FL', 'HI', 'IA', 'KY', 'MN', 'MO', 'MT', 'NJ', 'OR', 'UT', 'VT', 'VI', 'WV'],
+    'R7': [],
+    'R8': [],
+    'R9': [],
+    'R10': []
 }
-
 # Initialize Streamlit session state with default assignments
 if "assignments" not in st.session_state:
     st.session_state["assignments"] = default_original_assignments.copy()
@@ -55,17 +86,17 @@ if "assignments" not in st.session_state:
 if "proposed_assignments" not in st.session_state:
     st.session_state["proposed_assignments"] = default_proposed_assignments.copy()
     
-# ✅ SAFELY initialize assignments dictionary
+# SAFELY initialize assignments dictionary
     
 # This works around notebook/runtime issues
 session_assignments = st.session_state["assignments"]
 
 assigned_states = set()
 user_assignments = {}
-cols = st.columns(3)
+cols = st.columns(5)
 
 for i, group in enumerate(group_names):
-    with cols[i % 3]:
+    with cols[i % 5]:
         remaining = sorted(set(all_states).difference(assigned_states).union(session_assignments[group]))
         selected = st.multiselect(f"{group} States", options=remaining, default=session_assignments[group], key=group)
         user_assignments[group] = selected
@@ -75,13 +106,13 @@ for i, group in enumerate(group_names):
 # Show missing states
 unassigned = set(all_states) - assigned_states
 if unassigned:
-    st.warning(f"⚠️ Unassigned States: {', '.join(sorted(unassigned))}")
+    st.warning(f"Unassigned States: {', '.join(sorted(unassigned))}")
 else:
-    st.success("✅ All states assigned.")
-
+    st.success("All states assigned.")
+    
 # --- SECOND PLAN: PROPOSED ROLLOUT GROUP ASSIGNMENT ---
 
-st.subheader("🟠 Proposed Rollout Plan")
+st.subheader("Proposed Rollout Plan")
 
 # Safely store second plan assignments (session-safe)
 if "proposed_assignments" not in st.__dict__:
@@ -91,10 +122,10 @@ proposed_session = st.session_state["proposed_assignments"]
 
 proposed_assigned = set()
 proposed_assignments = {}
-cols2 = st.columns(3)
+cols2 = st.columns(5)
 
 for i, group in enumerate(group_names):
-    with cols2[i % 3]:
+    with cols2[i % 5]:
         # Include current selection to prevent deselection conflicts
         remaining = sorted(set(all_states).difference(proposed_assigned).union(proposed_session[group]))
         selected = st.multiselect(
@@ -110,10 +141,32 @@ for i, group in enumerate(group_names):
 # Warn if any are unassigned in proposed
 unassigned2 = set(all_states) - proposed_assigned
 if unassigned2:
-    st.warning(f"🟠 Proposed Plan Missing States: {', '.join(sorted(unassigned2))}")
+    st.warning(f" Proposed Plan Missing States: {', '.join(sorted(unassigned2))}")
 else:
-    st.success("🟠 Proposed plan fully assigned.")
+    st.success(" Proposed plan fully assigned.")
     
+  # === ROLLOUT DATES ASSIGNMENT ===
+st.subheader("📅 Rollout Group Dates")
+
+# Define quarter options from Q1 2026 to Q4 2030, plus 'N/A'
+quarters = [f"Q{q} {year}" for year in range(2026, 2031) for q in range(1, 5)]
+quarters.insert(0, "N/A")
+
+# Initialize session state if needed
+if "selected_rollout_dates" not in st.session_state:
+    st.session_state.selected_rollout_dates = {f"R{i}": "N/A" for i in range(1, 11)}
+
+# Layout into 5 columns (2 rows x 5)
+cols = st.columns(5)
+for i, col in enumerate(cols * 2):  # Repeat cols to make 10
+    group = f"R{i+1}"
+    st.session_state.selected_rollout_dates[group] = col.selectbox(
+        f"R{i+1}",
+        options=quarters,
+        index=quarters.index(st.session_state.selected_rollout_dates.get(group, "N/A")),
+        key=f"rollout_date_{group}"
+    )
+        
 # --- CLEANUP ---
 
 df['Manual_Rerate_Risk'] = df['Member Count'] * df['Average refund']
@@ -121,15 +174,6 @@ df['Manual_Rerate_Risk'] = df['Member Count'] * df['Average refund']
 st.subheader("📉 Manual Rerate Inputs")
 
 # --- Modifier Sliders ---
-
-# --- Confidence Interval Selection ---
-st.markdown("**Confidence Interval (for Bands):**")
-z_choice = st.selectbox("Z-score (affects width of confidence bands)", options={
-    "90% (±1.64)": 1.64,
-    "95% (±1.96)": 1.96,
-    "99% (±2.58)": 2.58
-})
-z_score = float(z_choice.split("±")[1][:-1])  # extracts the Z number
 
 st.markdown("**Yearly Modifier (Growth/Reduction Factor):**")
 modifiers = {}
@@ -146,19 +190,34 @@ for i, year in enumerate(range(2030, 2038)):
 
 # --- Rerate Weights ---
 
-st.markdown("**Rerate Weighting by Year Since Rollout (must sum to ~1.0):**")
+st.markdown("**Lookback Capture: Adjust how much of a the total rerate is considered manual**")
+st.markdown(
+    "Using historical analysis we see that for each year of data you increase the percentage of captured rerates, reducing the risk of manual rerates. "
+    "These weights model the percentage of captured rerates (cumulative) by year. They are initially set at the historical average. "
+    "When adjusting this note the values must sum to ~1.0. "
+    "For example, if you expect most of the rerates to be captured in the first few years, use heavier weights early on."
+)
+
 rerate_weights = {}
 weight_cols = st.columns(4)
-for i in range(1, 9):
-    with weight_cols[i % 4]:
+for i in range(1, 9):  # Year 1 to Year 8
+    with weight_cols[(i - 1) % 4]:
         rerate_weights[i] = st.number_input(
-            f"Year {i}", min_value=0.0, max_value=1.0, step=0.01, value=[0.4, 0.3, 0.14, 0.08, 0.04, 0.02, 0.01, 0.01][i - 1]
+            f"Weight for Year {i}", min_value=0.0, max_value=1.0, step=0.01,
+            value=[0.4, 0.3, 0.14, 0.08, 0.04, 0.02, 0.01, 0.01][i - 1]
         )
 
+# Show cumulative capture summary
+st.markdown("### 📈 Cumulative Capture Summary")
+cum_sum = 0
+for i in range(1, 9):
+    cum_sum += rerate_weights.get(i, 0)
+    st.markdown(f"- Year {i}: **{cum_sum:.0%}**")
+            
 # Normalize (optional safety)
 total_weight = sum(rerate_weights.values())
 if abs(total_weight - 1.0) > 0.01:
-    st.warning(f"⚠️ Rerate weights sum to {total_weight:.2f}. Consider adjusting.")
+    st.warning(f" Rerate weights sum to {total_weight:.2f}. Consider adjusting.")
 
 # --- SIMULATION PLACEHOLDER ---
 
@@ -248,10 +307,26 @@ if uploaded_file:
             uploaded_assignments[row['Rollout_Group']].append(row['State'])
 
         user_assignments = uploaded_assignments
-        st.success("✅ Rollout plan loaded successfully and applied.")
+        st.success(" Rollout plan loaded successfully and applied.")
         
 original_assignments = user_assignments
 proposed_assignments = proposed_assignments
+
+# --- CONFIDENCE INTERVAL SELECTION (UI near chart only) ---
+
+confidence_choice = st.selectbox(
+    "Confidence Interval (affects chart bands):",
+    options=["90% Confidence", "95% Confidence", "99% Confidence"],
+    index=1,
+)
+
+# Match the selected label to a z-score and short label
+confidence_map = {
+    "90% Confidence": (1.64, "90% CI"),
+    "95% Confidence": (1.96, "95% CI"),
+    "99% Confidence": (2.58, "99% CI")
+}
+z_score, conf_label = confidence_map[confidence_choice]
 
 # --- RUN SIMULATION ---
 
@@ -275,72 +350,78 @@ st.subheader("Projection: Manual Rerate Totals (Original vs Proposed)")
 
 import plotly.graph_objects as go
 
-st.subheader("📊 Manual Rerate Projection with Confidence Bands")
+st.subheader("Manual Rerate Projection with Confidence Bands")
 
-Z_choice = st.selectbox(
-    "Z-score (affects width of confidence bands)",
-    options=[
-        "90% (±1.64)",
-        "95% (±1.96)",
-        "99% (±2.58)"
-    ],
-    index=1
-)
-z_score = float(Z_choice.split("±")[1][:-1])  # pulls out 1.64, 1.96, or 2.58
-
-# Extract CI label for legend
-conf_label = f"{int(float(Z_choice.split('%')[0]))}% CI"
+# Used for chart band size and dynamic labeling in the plot
 
 fig = go.Figure()
 
-# Add Original Plan
-fig.add_trace(go.Scatter(
-    x=original_df['Year'],
-    y=original_df['Manual_Rerate'],
-    mode='lines+markers',
-    name='Original Plan',
-    line=dict(color='blue')
-))
+#  Add Original Plan: Confidence Band and Mean Estimate
+
+# 1. Upper Bound (first, invisible trace for top line)
 fig.add_trace(go.Scatter(
     x=original_df['Year'],
     y=original_df['Upper_Bound'],
-    name=f'Original {conf_label}',
+    name=f"Original Upper Bound ({conf_label})",
     line=dict(width=0),
-    showlegend=False
+    showlegend=False,
+    hovertemplate="Year: %{x}<br>Original Upper Bound: $%{y:,.0f}<extra></extra>"
 ))
+
+# 2. Lower Bound (second, filled to upper)
 fig.add_trace(go.Scatter(
     x=original_df['Year'],
     y=original_df['Lower_Bound'],
-    name=f'Original {conf_label}',
+    name=f"Original Lower Bound ({conf_label})",
     line=dict(width=0),
     fill='tonexty',
     fillcolor='rgba(0, 0, 255, 0.1)',
-    showlegend=True
+    showlegend=True,
+    hovertemplate="Year: %{x}<br>Original Lower Bound: $%{y:,.0f}<extra></extra>"
 ))
 
-# Add Proposed Plan
+# 3. Mean Estimate (shown on top)
 fig.add_trace(go.Scatter(
-    x=proposed_df['Year'],
-    y=proposed_df['Manual_Rerate'],
-    mode='lines+markers',
-    name='Proposed Plan',
-    line=dict(color='orange')
+    x=original_df['Year'],
+    y=original_df['Manual_Rerate'],
+    mode="lines+markers",
+    name="Original Plan",
+    line=dict(color="blue"),
+    hovertemplate="Year: %{x}<br>Original Mean Estimate: $%{y:,.0f}<extra></extra>"
 ))
+
+# Proposed Plan: Confidence Band and Mean Estimate
+
+# 1. Proposed Upper Bound (invisible trace for fill base)
 fig.add_trace(go.Scatter(
     x=proposed_df['Year'],
     y=proposed_df['Upper_Bound'],
-    name=f'Proposed {conf_label}',
+    name=f"Proposed Upper Bound ({conf_label})",
     line=dict(width=0),
-    showlegend=False
+    showlegend=False,
+    hovertemplate="Year: %{x}<br>Proposed Upper Bound: $%{y:,.0f}<extra></extra>"
 ))
+
+# 2. Proposed Lower Bound (fills to upper)
 fig.add_trace(go.Scatter(
     x=proposed_df['Year'],
     y=proposed_df['Lower_Bound'],
-    name=f'Proposed {conf_label}',
+    name=f"Proposed Lower Bound ({conf_label})",
     line=dict(width=0),
     fill='tonexty',
-    fillcolor='rgba(255, 165, 0, 0.1)',
-    showlegend=True
+    fillcolor='rgba(255, 165, 0, 0.1)',  # Light orange
+    showlegend=True,
+    hovertemplate="Year: %{x}<br>Proposed Lower Bound: $%{y:,.0f}<extra></extra>"
+))
+
+# 3. Proposed Mean Estimate (on top of fill)
+fig.add_trace(go.Scatter(
+    x=proposed_df['Year'],
+    y=proposed_df['Manual_Rerate'],
+    mode="lines+markers",
+    name="Proposed Plan",
+    line=dict(color="orange"),
+    hovertemplate="Year: %{x}<br>Proposed Mean Estimate: $%{y:,.0f}<extra></extra>"
 ))
 
 fig.update_layout(
@@ -351,10 +432,29 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True)
-# --- TABLE ---
+
+# --- RESULTS TABLE ---
 
 st.subheader("Delta Summary: Key Risk Indicator (KRI)")
-st.dataframe(comparison_df, use_container_width=True)
+formatted_df = comparison_df.copy()
+
+# Format Year column as plain strings (prevents comma formatting)
+formatted_df["Year"] = comparison_df["Year"].astype(str)
+
+# Format dollar columns with $ and commas
+for col in ["Manual_Rerate_Original", "Manual_Rerate_Proposed", "Delta ($)"]:
+    formatted_df[col] = pd.to_numeric(comparison_df[col], errors="coerce").apply(
+        lambda x: f"${x:,.0f}" if pd.notnull(x) else ""
+    )
+
+# Format Delta (%) as percentage with 1 decimal place
+formatted_df["Delta (%)"] = (
+    pd.to_numeric(comparison_df["Delta ($)"], errors="coerce") /
+    pd.to_numeric(comparison_df["Manual_Rerate_Original"], errors="coerce") * 100
+).apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else "")
+
+# Display formatted DataFrame
+st.dataframe(formatted_df, use_container_width=True)
 
 st.subheader("📁 Download Plan Results")
 
