@@ -11,7 +11,7 @@ st.title("Manual Rerate Rollout Strategy Comparison Tool")
 # --- INSTRUCTIONS AND PURPOSE ---
 with st.expander("ℹ️ About this Tool", expanded=True):
     st.markdown("""
-    This tool helps you compare the impact of different state-level rerate rollout strategies using a Monte Carlo simulation.
+    This tool helps you compare the impact of different state-level rerate rollout strategies.
 
     ### 🎯 Purpose:
     Estimate how much of the total rerate activity is considered **manual rerate** under different rollout plan assignments and timing scenarios.
@@ -26,8 +26,10 @@ with st.expander("ℹ️ About this Tool", expanded=True):
     ### 📊 Assumptions:
     - Rerates are distributed over 8 years post-rollout (weight-controlled)
     - Each state gets a **single rollout date**
-    - Confidence intervals are based on user-selected z-scores
+    - For app performance improvements, app utilizes standard deviation to inject variance in simulation
+    - Confidence intervals are based on user-selected bands
     - Simulation isolates only the **manual** portion of rerate projections
+    - **Simulation does not take into consideration any costs associated with conducting the manual rerate**
 
     ---
     """)
@@ -145,7 +147,21 @@ if unassigned2:
 else:
     st.success(" Proposed plan fully assigned.")
     
-  # === ROLLOUT DATES ASSIGNMENT ===
+  # --- ROLLOUT DATES ASSIGNMENT ---
+  
+st.markdown("""
+### 📅 Rollout Group Dates
+
+Each rollout group (R1–R10) is assigned a launch quarter, which sets the start date for rerate capture in each state. From that date forward:
+
+- Manual rerate exposure is calculated over an 8-year capture window.
+- Year 1 begins the quarter following rollout.
+- Timing has a direct effect on the size and duration of manual exposure.
+- If not using a group, leave it at N/A
+
+**Use these inputs to test timing strategies for risk reduction**.
+""")
+
 st.subheader("📅 Rollout Group Dates")
 
 # Define quarter options from Q1 2026 to Q4 2030, plus 'N/A'
@@ -171,7 +187,17 @@ for i, col in enumerate(cols * 2):  # Repeat cols to make 10
 
 df['Manual_Rerate_Risk'] = df['Member Count'] * df['Average refund']
 
-st.subheader("📉 Manual Rerate Inputs")
+st.markdown("""
+### 🧮 Manual Rerate Inputs: Growth / Reduction Modifiers
+
+These annual modifiers allow you to adjust refund projections based on expected business trends, operational changes, or policy assumptions.
+
+- A value of **1.00** means no change from baseline.
+- A value above 1.00 (e.g., 1.05) reflects **growth** in refund exposure that year.
+- A value below 1.00 (e.g., 0.95) reflects a **reduction** in exposure, potentially due to improved controls or automation.
+
+Changes here scale the refund total each year, allowing for more realistic forecasting of future risk under your rollout plan.
+""")
 
 # --- Modifier Sliders ---
 
@@ -187,16 +213,19 @@ for i, year in enumerate(range(2030, 2038)):
             step=0.01,
             value=1.0,
         )
-
+        
 # --- Rerate Weights ---
 
-st.markdown("**Lookback Capture: Adjust how much of a the total rerate is considered manual**")
-st.markdown(
-    "Using historical analysis we see that for each year of data you increase the percentage of captured rerates, reducing the risk of manual rerates. "
-    "These weights model the percentage of captured rerates (cumulative) by year. They are initially set at the historical average. "
-    "When adjusting this note the values must sum to ~1.0. "
-    "For example, if you expect most of the rerates to be captured in the first few years, use heavier weights early on."
-)
+st.subheader("📈 Lookback Capture Weights")
+
+st.markdown("**Adjust how much of a the total rerate is considered manual**")
+st.markdown("""
+    - Using historical analysis we see that for each year of data you increase the percentage of captured rerates, reducing the risk of manual rerates. 
+    - These weights model the percentage of captured rerates (cumulative) by year and are default set at the historical average. 
+    - When adjusting this note the values must sum to ~1.0. 
+    
+    -*For example, if you expect most of the rerates to be captured in the first few years, use heavier weights early on.*
+""")
 
 rerate_weights = {}
 weight_cols = st.columns(4)
@@ -218,58 +247,64 @@ for i in range(1, 9):
 total_weight = sum(rerate_weights.values())
 if abs(total_weight - 1.0) > 0.01:
     st.warning(f" Rerate weights sum to {total_weight:.2f}. Consider adjusting.")
-
-# --- SIMULATION PLACEHOLDER ---
-
+    
+# --- SIMULATION ---
 def simulate_rollout(assignments, df, rollout_dates, rerate_weights, modifiers, z_score=1.96):
-    df = df.copy(deep=True)
+    df = df.copy()
     df['Rollout_Group'] = 'Unassigned'
     df['Rollout_Date'] = pd.NaT
 
+    # Map rollout dates to each state
     for group, states in assignments.items():
         for state in states:
             df.loc[df['State'] == state, 'Rollout_Group'] = group
             df.loc[df['State'] == state, 'Rollout_Date'] = rollout_dates[group]
 
-    projection_years = list(range(2030, 2038))
+    projection_years = list(range(2030, 2043))  # Extend through 2042
     results = []
 
     for year in projection_years:
-        total_manual_rerate = 0
-        variance_sum = 0
+        total = 0
+        variance = 0
 
         for _, row in df.iterrows():
-            if pd.isnull(row['Rollout_Date']):
-                continue
             rollout = row['Rollout_Date']
-            capture_end_year = rollout.year + 8
-            if year > capture_end_year - 1:
+            if pd.isnull(rollout):
                 continue
 
             years_out = (year - rollout.year) + 1
             if years_out < 1 or years_out > 8:
-                continue
+                continue  # Outside lookback window
 
             weight = rerate_weights.get(years_out, 0)
             modifier = modifiers.get(year, 1.0)
 
-            base_rerate = row['Member Count'] * row['Average refund']
-            manual_rerate = base_rerate * weight * modifier
-            std_dev = (row['Member Count'] * row['Stdev refunds'] * weight * modifier) ** 2
+            members = row['Member Count']
+            avg = row['Average refund']
+            std = row['Stdev refunds']
+            rmin = row['Min Refund']
+            rmax = row['Max Refund']
 
-            total_manual_rerate += manual_rerate
-            variance_sum += std_dev
+            # Sample from normal with bounds
+            sampled_refund = np.clip(np.random.normal(loc=avg, scale=std), rmin, rmax)
+            sampled_refund = max(sampled_refund, 0)
 
-        std_total = np.sqrt(variance_sum)
+            manual = members * sampled_refund * weight * modifier
+            total += manual
+
+            # Use adjusted std dev for confidence interval
+            variance += (members * sampled_refund * weight * modifier) ** 2
+
+        std_total = np.sqrt(variance)
         results.append({
             'Year': year,
-            'Manual_Rerate': total_manual_rerate,
-            'Lower_Bound': max(0, total_manual_rerate - z_score * std_total),
-            'Upper_Bound': total_manual_rerate + z_score * std_total
+            'Manual_Rerate': total,
+            'Lower_Bound': max(0, total - z_score * std_total),
+            'Upper_Bound': total + z_score * std_total
         })
 
     return pd.DataFrame(results)
-
+        
 # --- STATIC INPUTS (PLACEHOLDERS FOR NOW) ---
 
 rollout_dates = {
@@ -333,19 +368,19 @@ z_score, conf_label = confidence_map[confidence_choice]
 original_df = simulate_rollout(original_assignments, df, rollout_dates, rerate_weights, modifiers, z_score)
 proposed_df = simulate_rollout(proposed_assignments, df, rollout_dates, rerate_weights, modifiers, z_score)
 
-# --- BUILD COMPARISON ---
-
+    # --- Build Comparison ---
+    
 comparison_df = original_df[['Year', 'Manual_Rerate']].merge(
-    proposed_df[['Year', 'Manual_Rerate']],
-    on='Year',
-    suffixes=('_Original', '_Proposed')
+proposed_df[['Year', 'Manual_Rerate']],
+on='Year',
+suffixes=('_Original', '_Proposed')
 )
 comparison_df['Delta ($)'] = comparison_df['Manual_Rerate_Original'] - comparison_df['Manual_Rerate_Proposed']
 comparison_df['Delta (%)'] = (comparison_df['Delta ($)'] / comparison_df['Manual_Rerate_Original']) * 100
 comparison_df['Delta (%)'] = comparison_df['Delta (%)'].map('{:.1f}%'.format)
 
-# --- CHART ---
-
+    # --- Chart ---
+    
 st.subheader("Projection: Manual Rerate Totals (Original vs Proposed)")
 
 import plotly.graph_objects as go
@@ -438,8 +473,8 @@ st.plotly_chart(fig, use_container_width=True)
 st.subheader("Delta Summary: Key Risk Indicator (KRI)")
 formatted_df = comparison_df.copy()
 
-# Format Year column as plain strings (prevents comma formatting)
-formatted_df["Year"] = comparison_df["Year"].astype(str)
+# Format Year column as plain strings (after summary row is added)
+comparison_df["Year"] = comparison_df["Year"].astype(str)
 
 # Format dollar columns with $ and commas
 for col in ["Manual_Rerate_Original", "Manual_Rerate_Proposed", "Delta ($)"]:
@@ -452,6 +487,32 @@ formatted_df["Delta (%)"] = (
     pd.to_numeric(comparison_df["Delta ($)"], errors="coerce") /
     pd.to_numeric(comparison_df["Manual_Rerate_Original"], errors="coerce") * 100
 ).apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else "")
+
+# Calculate totals and append as a summary row
+totals = {
+    "Year": "Total",
+    "Manual_Rerate_Original": "${:,.0f}".format(
+        pd.to_numeric(comparison_df["Manual_Rerate_Original"], errors="coerce").sum()
+    ),
+    "Manual_Rerate_Proposed": "${:,.0f}".format(
+        pd.to_numeric(comparison_df["Manual_Rerate_Proposed"], errors="coerce").sum()
+    ),
+    "Delta ($)": "${:,.0f}".format(
+        pd.to_numeric(comparison_df["Delta ($)"], errors="coerce").sum()
+    ),
+}
+
+# Compute overall percent delta
+original_total = pd.to_numeric(comparison_df["Manual_Rerate_Original"], errors="coerce").sum()
+delta_total = pd.to_numeric(comparison_df["Delta ($)"], errors="coerce").sum()
+
+if original_total != 0:
+    totals["Delta (%)"] = "{:.1f}%".format((delta_total / original_total) * 100)
+else:
+    totals["Delta (%)"] = "N/A"
+
+# Append to formatted_df
+formatted_df.loc[len(formatted_df)] = totals
 
 # Display formatted DataFrame
 st.dataframe(formatted_df, use_container_width=True)
