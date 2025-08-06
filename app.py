@@ -17,8 +17,7 @@ with st.expander("ℹ️ About this Tool", expanded=True):
     Estimate how much of the total rerate activity is considered **manual rerate** under different rollout plan assignments and timing scenarios.
 
     ### 🛠️ How to Use:
-    - Assign U.S. states into rollout groups (R1–R10) for both original and proposed plans
-    - Choose rollout dates by quarter
+    - Assign/adjust U.S. states to quarters for both original and proposed plans
     - Adjust the **growth/reduction modifiers** to reflect plan assumptions
     - Set **Lookback Capture Weights** to determine how fast rerates are realized manually
     - View changes in the output rerate projections and risk indicator (KRI)
@@ -46,146 +45,89 @@ def load_data():
 
 df = load_data()
 
-# --- ROLLOUT GROUP ASSIGNMENT ---
-
-st.subheader("Rollout Group Assignment")
+df['Avg Refund'] = df['Sum Refunds (Inverted)'] / df['Count of Valid Refunds']
 
 # Get all states
 all_states = sorted(df['State'].unique().tolist())
-group_names = [f'R{i}' for i in range(1, 11)]  # R1 through R10
 
-# --- DEFAULT ASSIGNMENTS TO PRELOAD ---
+# Create quarterly buckets Q1 2026 – Q4 2032 for proposed rollout
+quarter_list = [f"Q{q} {y}" for y in range(2026, 2033) for q in range(1, 5)]
 
-default_original_assignments = {
-    'R1': ['WI'],
-    'R2': ['AZ', 'FL', 'IL', 'LA', 'MO', 'MN', 'OH', 'TN', 'TX'],
-    'R3': ['CT', 'IN', 'KS', 'KY', 'MD', 'MI', 'NY', 'OR', 'SC', 'VA', 'UT'],
-    'R4': ['AL', 'AR', 'DE', 'GA', 'ID', 'NC', 'OK', 'RI', 'CO', 'NJ'],
-    'R5': ['DC', 'IA', 'MS', 'NM', 'NV', 'PA', 'WV', 'CA', 'HI', 'WA', 'MA', 'VI'],
-    'R6': ['AK', 'ME', 'MT', 'ND', 'NE', 'SD', 'VT', 'WY', 'NH'],
-    'R7': [],
-    'R8': [],
-    'R9': [],
-    'R10': []
+# --- ORIGINAL PLAN: ASSIGN STATES TO QUARTERS (Prefilled) ---
+
+st.subheader("📋 Original State Launch Plan (Quarterly)")
+
+# Default quartered assignments for original rollout
+default_original_quarters = {
+    "Q1 2026": ["WI"],
+    "Q2 2026": ["AZ", "FL", "IL", "LA", "MO", "MN", "OH", "TN", "TX"],
+    "Q3 2026": ["CT", "IN", "KS", "KY", "MD", "MI", "NY", "OR", "SC", "VA", "UT"],
+    "Q4 2026": ["AL", "AR", "DE", "GA", "ID", "NC", "OK", "RI", "CO", "NJ"],
+    "Q1 2027": ["DC", "IA", "MS", "NM", "NV", "PA", "WV", "CA", "HI", "WA", "MA"],
+    "Q2 2027": ["AK", "ME", "MT", "ND", "NE", "SD", "VT", "WY", "NH"],
+    # fill in additional if needed
 }
 
-default_proposed_assignments = {
-    'R1': ['WI'],
-    'R2': ['NC', 'MD', 'CO', 'AZ', 'VA', 'CT', 'IN', 'SD'],
-    'R3': ['TX', 'KS', 'IL', 'GA', 'LA', 'AK', 'NH', 'NE', 'ND'],
-    'R4': ['MA', 'SC', 'WA', 'AR', 'WY', 'NM', 'ID', 'RI'],
-    'R5': ['NY', 'NV', 'MS', 'TN', 'OK', 'DC', 'ME'],
-    'R6': ['MI', 'PA', 'OH', 'CA', 'AL', 'DE', 'FL', 'HI', 'IA', 'KY', 'MN', 'MO', 'MT', 'NJ', 'OR', 'UT', 'VT', 'VI', 'WV'],
-    'R7': [],
-    'R8': [],
-    'R9': [],
-    'R10': []
-}
-# Initialize Streamlit session state with default assignments
-if "assignments" not in st.session_state:
-    st.session_state["assignments"] = default_original_assignments.copy()
+if "original_quarters" not in st.session_state:
+    st.session_state.original_quarters = default_original_quarters.copy()
 
-if "proposed_assignments" not in st.session_state:
-    st.session_state["proposed_assignments"] = default_proposed_assignments.copy()
-    
-# SAFELY initialize assignments dictionary
-    
-# This works around notebook/runtime issues
-session_assignments = st.session_state["assignments"]
+original_assigned = set()
+original_cols = st.columns(4)
 
-assigned_states = set()
-user_assignments = {}
-cols = st.columns(5)
+for i, quarter in enumerate(quarter_list):
+    with original_cols[i % 4]:
+        current = st.session_state.original_quarters.get(quarter, [])
+        selected = st.multiselect(
+            f"{quarter}",
+            options=sorted(set(all_states) - original_assigned | set(current)),
+            default=current,
+            key=f"original_{quarter}"
+        )
+        st.session_state.original_quarters[quarter] = selected
+        original_assigned.update(selected)
 
-for i, group in enumerate(group_names):
-    with cols[i % 5]:
-        remaining = sorted(set(all_states).difference(assigned_states).union(session_assignments[group]))
-        selected = st.multiselect(f"{group} States", options=remaining, default=session_assignments[group], key=group)
-        user_assignments[group] = selected
-        session_assignments[group] = selected
-        assigned_states.update(selected)
-
-# Show missing states
-unassigned = set(all_states) - assigned_states
-if unassigned:
-    st.warning(f"Unassigned States: {', '.join(sorted(unassigned))}")
+missing_original = set(all_states) - original_assigned
+if missing_original:
+    st.warning(f"⚠️ Unassigned in Original Plan: {', '.join(sorted(missing_original))}")
 else:
-    st.success("All states assigned.")
+    st.success("✅ All states assigned to original launch quarters.")
+    
+# --- DEFAULT PROPOSED QUARTERLY PLAN ---
+
+# Initialize session state storage for proposed rollout (by quarter)
+if "proposed_quarters" not in st.session_state:
+    st.session_state.proposed_quarters = {q: [] for q in quarter_list}
     
 # --- SECOND PLAN: PROPOSED ROLLOUT GROUP ASSIGNMENT ---
 
-st.subheader("Proposed Rollout Plan")
+# --- PROPOSED PLAN: ASSIGN STATES TO QUARTERS ---
 
-# Safely store second plan assignments (session-safe)
-if "proposed_assignments" not in st.__dict__:
-    st.proposed_assignments = {g: [] for g in group_names}
-
-proposed_session = st.session_state["proposed_assignments"]
+st.subheader("🗓️ Proposed State Launch Plan (Quarterly)")
 
 proposed_assigned = set()
-proposed_assignments = {}
-cols2 = st.columns(5)
+cols = st.columns(4)
 
-for i, group in enumerate(group_names):
-    with cols2[i % 5]:
-        # Include current selection to prevent deselection conflicts
-        remaining = sorted(set(all_states).difference(proposed_assigned).union(proposed_session[group]))
+for i, quarter in enumerate(quarter_list):
+    with cols[i % 4]:
+        remaining = sorted(set(all_states).difference(proposed_assigned).union(st.session_state.proposed_quarters[quarter]))
         selected = st.multiselect(
-            f"{group} (Proposed)",
+            f"{quarter}",
             options=remaining,
-            default=proposed_session[group],
-            key=f"proposed_{group}"
+            default=st.session_state.proposed_quarters[quarter],
+            key=f"proposed_{quarter}"
         )
-        proposed_assignments[group] = selected
-        proposed_session[group] = selected
+        st.session_state.proposed_quarters[quarter] = selected
         proposed_assigned.update(selected)
 
-# Warn if any are unassigned in proposed
-unassigned2 = set(all_states) - proposed_assigned
-if unassigned2:
-    st.warning(f" Proposed Plan Missing States: {', '.join(sorted(unassigned2))}")
+missing_states = set(all_states) - proposed_assigned
+if missing_states:
+    st.warning(f"⚠️ Unassigned States: {', '.join(sorted(missing_states))}")
 else:
-    st.success(" Proposed plan fully assigned.")
-    
-  # --- ROLLOUT DATES ASSIGNMENT ---
-  
-st.markdown("""
-### 📅 Rollout Group Dates
-
-Each rollout group (R1–R10) is assigned a launch quarter, which sets the start date for rerate capture in each state. From that date forward:
-
-- Manual rerate exposure is calculated over an 8-year capture window.
-- Year 1 begins the quarter following rollout.
-- Timing has a direct effect on the size and duration of manual exposure.
-- If not using a group, leave it at N/A
-
-**Use these inputs to test timing strategies for risk reduction**.
-""")
-
-st.subheader("📅 Rollout Group Dates")
-
-# Define quarter options from Q1 2026 to Q4 2030, plus 'N/A'
-quarters = [f"Q{q} {year}" for year in range(2026, 2031) for q in range(1, 5)]
-quarters.insert(0, "N/A")
-
-# Initialize session state if needed
-if "selected_rollout_dates" not in st.session_state:
-    st.session_state.selected_rollout_dates = {f"R{i}": "N/A" for i in range(1, 11)}
-
-# Layout into 5 columns (2 rows x 5)
-cols = st.columns(5)
-for i, col in enumerate(cols * 2):  # Repeat cols to make 10
-    group = f"R{i+1}"
-    st.session_state.selected_rollout_dates[group] = col.selectbox(
-        f"R{i+1}",
-        options=quarters,
-        index=quarters.index(st.session_state.selected_rollout_dates.get(group, "N/A")),
-        key=f"rollout_date_{group}"
-    )
+    st.success("✅ All states assigned to proposed launch quarters.")
         
-# --- CLEANUP ---
+ # --- CLEANUP ---
 
-df['Manual_Rerate_Risk'] = df['Member Count'] * df['Average refund']
+df['Manual_Rerate_Risk'] = df['Member Count'] * df['Avg Refund']
 
 st.markdown("""
 ### 🧮 Manual Rerate Inputs: Growth / Reduction Modifiers
@@ -248,23 +190,36 @@ total_weight = sum(rerate_weights.values())
 if abs(total_weight - 1.0) > 0.01:
     st.warning(f" Rerate weights sum to {total_weight:.2f}. Consider adjusting.")
     
+# --- QUARTER STRING DATETIME CONVERSION ---
+
+def quarter_to_date(qstr):
+    q, year = qstr.split()
+    quarter_month = {"Q1": 1, "Q2": 4, "Q3": 7, "Q4": 10}
+    return datetime(int(year), quarter_month[q], 1)
+    
 # --- SIMULATION ---
-def simulate_rollout(assignments, df, rollout_dates, rerate_weights, modifiers, z_score=1.96):
+
+def simulate_rollout(assignments_key, df, rollout_dates, rerate_weights, modifiers, z_score=1.96):
     df = df.copy()
     df['Rollout_Group'] = 'Unassigned'
     df['Rollout_Date'] = pd.NaT
 
-    # Map rollout dates to each state
-    for group, states in assignments.items():
-        for state in states:
-            df.loc[df['State'] == state, 'Rollout_Group'] = group
-            df.loc[df['State'] == state, 'Rollout_Date'] = rollout_dates[group]
-
-    projection_years = list(range(2030, 2043))  # Extend through 2042
+    if assignments_key == "proposed":
+        for q, states in st.session_state.proposed_quarters.items():
+            for state in states:
+                df.loc[df['State'] == state, 'Rollout_Group'] = q
+                df.loc[df['State'] == state, 'Rollout_Date'] = quarter_to_date(q)
+    else:
+        for state, quarter in assignments_key.items():
+            df.loc[df['State'] == state, 'Rollout_Group'] = quarter
+            df.loc[df['State'] == state, 'Rollout_Date'] = quarter_to_date(quarter)
+        
+    projection_years = list(range(2030, 2043))  # Simulate through 2042
     results = []
 
     for year in projection_years:
-        total = 0
+        total_dollars = 0
+        total_count = 0
         variance = 0
 
         for _, row in df.iterrows():
@@ -280,49 +235,41 @@ def simulate_rollout(assignments, df, rollout_dates, rerate_weights, modifiers, 
             modifier = modifiers.get(year, 1.0)
 
             members = row['Member Count']
-            avg = row['Average refund']
+            avg = row['Avg Refund']
             std = row['Stdev refunds']
             rmin = row['Min Refund']
             rmax = row['Max Refund']
+            annual_rerate_count = row['Count of Valid Refunds'] / 5
 
-            # Sample from normal with bounds
+            # Sample refund amount (bounded normal)
             sampled_refund = np.clip(np.random.normal(loc=avg, scale=std), rmin, rmax)
             sampled_refund = max(sampled_refund, 0)
 
-            manual = members * sampled_refund * weight * modifier
-            total += manual
+            manual_dollars = members * sampled_refund * weight * modifier
+            manual_counts = annual_rerate_count * weight * modifier
 
-            # Use adjusted std dev for confidence interval
+            total_dollars += manual_dollars
+            total_count += manual_counts
+
+            # Variance logic for confidence band
             variance += (members * sampled_refund * weight * modifier) ** 2
 
         std_total = np.sqrt(variance)
+
         results.append({
             'Year': year,
-            'Manual_Rerate': total,
-            'Lower_Bound': max(0, total - z_score * std_total),
-            'Upper_Bound': total + z_score * std_total
+            'Manual_Rerate': total_dollars,
+            'Manual_Count': total_count,
+            'Lower_Bound': max(0, total_dollars - z_score * std_total),
+            'Upper_Bound': total_dollars + z_score * std_total
         })
 
     return pd.DataFrame(results)
         
 # --- STATIC INPUTS (PLACEHOLDERS FOR NOW) ---
 
-rollout_dates = {
-    'R1': datetime(2026, 1, 30),
-    'R2': datetime(2027, 1, 30),
-    'R3': datetime(2027, 4, 30),
-    'R4': datetime(2027, 10, 30),
-    'R5': datetime(2028, 1, 30),
-    'R6': datetime(2028, 7, 30),
-}
-
 rerate_weights = {i+1: v for i, v in enumerate([0.4, 0.3, 0.14, 0.08, 0.04, 0.02, 0.01, 0.01])}
 modifiers = {year: 1.0 for year in range(2030, 2038)}
-
-# --- TEMP STATIC GROUPINGS (SAME FOR BOTH) ---
-
-states = df['State'].tolist()
-equal_groups = [states[i::6] for i in range(6)]
 
 # --- OPTIONAL: Upload a saved rollout plan from file ---
 
@@ -342,10 +289,13 @@ if uploaded_file:
             uploaded_assignments[row['Rollout_Group']].append(row['State'])
 
         user_assignments = uploaded_assignments
-        st.success(" Rollout plan loaded successfully and applied.")
+        st.success("✅ Original rollout plan loaded and applied.")
         
-original_assignments = user_assignments
-proposed_assignments = proposed_assignments
+# Convert original_quarters to original_assignments dict
+original_assignments = {}
+for quarter, states in st.session_state.original_quarters.items():
+    for state in states:
+        original_assignments[state] = quarter
 
 # --- CONFIDENCE INTERVAL SELECTION (UI near chart only) ---
 
@@ -365,21 +315,27 @@ z_score, conf_label = confidence_map[confidence_choice]
 
 # --- RUN SIMULATION ---
 
-original_df = simulate_rollout(original_assignments, df, rollout_dates, rerate_weights, modifiers, z_score)
-proposed_df = simulate_rollout(proposed_assignments, df, rollout_dates, rerate_weights, modifiers, z_score)
+original_df = simulate_rollout(original_assignments, df, None, rerate_weights, modifiers, z_score)
+proposed_df = simulate_rollout("proposed", df, None, rerate_weights, modifiers, z_score)
 
-    # --- Build Comparison ---
+# --- Build Comparison ---
     
-comparison_df = original_df[['Year', 'Manual_Rerate']].merge(
-proposed_df[['Year', 'Manual_Rerate']],
-on='Year',
-suffixes=('_Original', '_Proposed')
+# Add to comparison_df
+comparison_df = original_df[['Year', 'Manual_Rerate', 'Manual_Count']].merge(
+    proposed_df[['Year', 'Manual_Rerate', 'Manual_Count']],
+    on='Year',
+    suffixes=('_Original', '_Proposed')
 )
+
+# Add new delta columns
 comparison_df['Delta ($)'] = comparison_df['Manual_Rerate_Original'] - comparison_df['Manual_Rerate_Proposed']
-comparison_df['Delta (%)'] = (comparison_df['Delta ($)'] / comparison_df['Manual_Rerate_Original']) * 100
+comparison_df['Delta Count'] = comparison_df['Manual_Count_Original'] - comparison_df['Manual_Count_Proposed']
+comparison_df['Delta (%)'] = (
+    comparison_df['Delta ($)'] / comparison_df['Manual_Rerate_Original']
+).replace([np.inf, -np.inf], 0).fillna(0) * 100
 comparison_df['Delta (%)'] = comparison_df['Delta (%)'].map('{:.1f}%'.format)
 
-    # --- Chart ---
+# --- Chart ---
     
 st.subheader("Projection: Manual Rerate Totals (Original vs Proposed)")
 
@@ -473,6 +429,10 @@ st.plotly_chart(fig, use_container_width=True)
 st.subheader("Delta Summary: Key Risk Indicator (KRI)")
 formatted_df = comparison_df.copy()
 
+# Round manual count values to whole numbers
+formatted_df["Manual_Count_Original"] = formatted_df["Manual_Count_Original"].round(0).astype(int)
+formatted_df["Manual_Count_Proposed"] = formatted_df["Manual_Count_Proposed"].round(0).astype(int)
+
 # Format Year column as plain strings (after summary row is added)
 comparison_df["Year"] = comparison_df["Year"].astype(str)
 
@@ -491,15 +451,12 @@ formatted_df["Delta (%)"] = (
 # Calculate totals and append as a summary row
 totals = {
     "Year": "Total",
-    "Manual_Rerate_Original": "${:,.0f}".format(
-        pd.to_numeric(comparison_df["Manual_Rerate_Original"], errors="coerce").sum()
-    ),
-    "Manual_Rerate_Proposed": "${:,.0f}".format(
-        pd.to_numeric(comparison_df["Manual_Rerate_Proposed"], errors="coerce").sum()
-    ),
-    "Delta ($)": "${:,.0f}".format(
-        pd.to_numeric(comparison_df["Delta ($)"], errors="coerce").sum()
-    ),
+    "Manual_Rerate_Original": "${:,.0f}".format(comparison_df["Manual_Rerate_Original"].sum()),
+    "Manual_Rerate_Proposed": "${:,.0f}".format(comparison_df["Manual_Rerate_Proposed"].sum()),
+    "Manual_Count_Original": int(comparison_df["Manual_Count_Original"].sum()),
+    "Manual_Count_Proposed": int(comparison_df["Manual_Count_Proposed"].sum()),
+    "Delta ($)": "${:,.0f}".format(comparison_df["Delta ($)"].sum()),
+    "Delta Count": int(comparison_df["Delta Count"].sum()),
 }
 
 # Compute overall percent delta
@@ -513,6 +470,25 @@ else:
 
 # Append to formatted_df
 formatted_df.loc[len(formatted_df)] = totals
+
+# --- Custom CSS to color columns ---
+st.markdown("""
+    <style>
+    .element-container:has(div[data-testid="stDataFrame"]) td:nth-child(2),
+    .element-container:has(div[data-testid="stDataFrame"]) td:nth-child(3),
+    .element-container:has(div[data-testid="stDataFrame"]) th:nth-child(2),
+    .element-container:has(div[data-testid="stDataFrame"]) th:nth-child(3) {
+        background-color: #e6ffe6;  /* Light green */
+    }
+
+    .element-container:has(div[data-testid="stDataFrame"]) td:nth-child(4),
+    .element-container:has(div[data-testid="stDataFrame"]) td:nth-child(5),
+    .element-container:has(div[data-testid="stDataFrame"]) th:nth-child(4),
+    .element-container:has(div[data-testid="stDataFrame"]) th:nth-child(5) {
+        background-color: #e6f0ff;  /* Light blue */
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # Display formatted DataFrame
 st.dataframe(formatted_df, use_container_width=True)
