@@ -60,7 +60,7 @@ with st.expander("What this simulator does (read me first)", expanded=True):
 - Ops costs/savings are **not** modeled.
 
 **Weights clarity.**
-- If **Year 1 weight = 40%**, that means **40% of the lifetime manual rerates are captured in the first year after conversion** and **60% remain** for later years. The **cumulative** list shows percent captured **to‑date** by the end of each year.
+- If **Year 1 weight = 40%**, that means **40% of the rerates are captured in the first year after conversion** and **60% remain** for later years. The **cumulative** list shows percent captured **to‑date** by the end of each year.
 
 **How to read results.**
 - **Key Results** show totals for each plan and **Δ (Original − Proposed)**. The banner directly below states who is worse and by how much **in dollars and counts**.
